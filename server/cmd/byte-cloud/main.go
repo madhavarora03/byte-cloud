@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/madhavarora03/byte-cloud/internal/config"
+	"github.com/madhavarora03/byte-cloud/internal/http/handlers/health"
 	"github.com/madhavarora03/byte-cloud/internal/storage/postgres"
 	"log"
 	"log/slog"
@@ -43,6 +44,12 @@ func main() {
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
 
+	//	create API version group
+	v1 := router.Group("/api/v1")
+
+	//	register routes for different services
+	health.SetupRouter(v1)
+	
 	//	start server
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Port),
