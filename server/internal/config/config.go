@@ -7,10 +7,14 @@ import (
 	"os"
 )
 
+type HttpServer struct {
+	Port int `yaml:"port" env:"PORT" env-default:"8080"`
+}
 type Config struct {
 	AppVersion string `yaml:"app-version" env:"APP_VERSION" env-required:"true"`
 	Env        string `yaml:"env" env:"ENV" env-default:"production"`
 	DbUri      string `yaml:"db-uri" env:"DB_URI" env-required:"true"`
+	HttpServer `yaml:"http-server" env:"HTTP_SERVER"`
 }
 
 var cfg *Config
