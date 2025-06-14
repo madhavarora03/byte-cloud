@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"embed"
 	"fmt"
 	"github.com/gin-gonic/gin"
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/madhavarora03/byte-cloud/internal/config"
+	"github.com/madhavarora03/byte-cloud/internal/db"
 	"github.com/madhavarora03/byte-cloud/internal/http/handlers/health"
-	"github.com/madhavarora03/byte-cloud/internal/storage/postgres"
 	"log"
 	"log/slog"
 	"net/http"
@@ -16,20 +19,54 @@ import (
 	"time"
 )
 
+var (
+	//go:embed migrations/*.sql
+	migrationFiles embed.FS
+)
+
 func main() {
 	//	Load config
 	cfg := config.MustLoad()
 
 	//	Connect to db
-	db, err := postgres.Init(cfg)
-	if err != nil {
-		slog.Error("cannot init postgres: %s", err.Error())
-		os.Exit(1)
+	ctx := context.Background()
+	dbConfig := &db.Config{
+		MigrationsTable:       "schema_migrations",
+		DatabaseName:          "your_db_name", // will be auto-detected if blank
+		SchemaName:            "public",       // will be auto-detected if blank
+		StatementTimeout:      10 * time.Second,
+		MultiStatementEnabled: true,
 	}
 
-	defer db.Conn.Close(context.Background())
-	slog.Info("connected to postgres", slog.String("env", cfg.Env), slog.String("version", cfg.AppVersion))
+	pg, err := db.NewPostgres(ctx, dbConfig, cfg.DbUri)
+	if err != nil {
+		log.Fatalf("Failed to connect to DB: %v", err)
+	}
+	defer pg.Db.Close()
 
+	slog.Info("connected to db", slog.String("env", cfg.Env), slog.String("version", cfg.AppVersion))
+
+	//	run migrations
+	d, err := iofs.New(migrationFiles, "migrations")
+	if err != nil {
+		log.Fatalf("Failed to read embedded migrations: %v", err)
+	}
+
+	driver, err := db.WithInstance(pg.Db, dbConfig)
+	if err != nil {
+		log.Fatalf("Failed to wrap db: %v", err)
+	}
+
+	m, err := migrate.NewWithInstance("iofs", d, "pgx5", driver)
+	if err != nil {
+		log.Fatalf("Failed to initialize migrator: %v", err)
+	}
+
+	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+		log.Fatalf("Migration failed: %v", err)
+	}
+
+	slog.Info("migrations ran successfully")
 	//	setup router
 	if cfg.Env == "production" {
 		//	in production use release mode
@@ -49,7 +86,7 @@ func main() {
 
 	//	register routes for different services
 	health.SetupRouter(v1)
-	
+
 	//	start server
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Port),
